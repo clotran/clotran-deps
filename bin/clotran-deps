@@ -1,0 +1,34 @@
+#!/bin/sh
+# clotran-deps [-A:alias[:alias...]] [dir]
+#
+# Prints the CLOTRAN_PATH for the project in dir (default: here), from its
+# deps.edn, fetching what it names first; exits 1 with the reason on
+# stderr when it cannot. clotran runs it. Until clotran has -main and
+# *command-line-args* (its PLAN step 22), the arguments are written into
+# a one-line driver, as `clotran explain` does.
+#
+#   CLOTRAN_PATH=$(clotran-deps) clotran app.cljf
+#
+# CLOTRAN is the clotran checkout to run on (default ~/jborden/clotran).
+here=$(cd "$(dirname "$0")/.." && pwd)
+clotran=${CLOTRAN:-$HOME/jborden/clotran}
+aliases=""
+dir="."
+for a in "$@"; do
+  case "$a" in
+    -A*) aliases=$(printf '%s' "${a#-A}" | tr ':' ' ') ;;
+    *) dir="$a" ;;
+  esac
+done
+dir=$(cd "$dir" && pwd) || exit 1
+work=$(mktemp -d) || exit 1
+trap 'rm -rf "$work"' EXIT
+kws=""
+for k in $aliases; do kws="$kws :$k"; done
+printf '(require (quote clotran.deps))\n(try (println (clotran.deps/path-string "%s" [%s]))\n  (catch Exception e (binding [*out* *err*] (println (ex-message e))) (clotran-exit 1)))\n' \
+  "$dir" "$kws" > "$work/run.clj"
+CLOTRAN_PATH="$here/src" "$clotran/clotran" "$work/run.clj" </dev/null >"$work/out" 2>"$work/err"
+st=$?
+grep -v '^note:\|^user=>\|^ *$' "$work/out"
+grep -v '^note:\|^user=>' "$work/err" >&2
+exit $st

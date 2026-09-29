@@ -1,0 +1,3 @@
+;; clotran-deps is itself a project: its source is src/, and it needs
+;; nothing but clotran.
+{:paths ["src"]}

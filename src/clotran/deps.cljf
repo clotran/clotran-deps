@@ -1,0 +1,133 @@
+(ns clotran.deps
+  "clotran's package manager: reads a project's deps.edn -- the same file
+  and keys a Clojure project has -- fetches what it names, and answers
+  the source path clotran searches (CLOTRAN_PATH), as tools.deps answers
+  the JVM's classpath. See clotran's PACKAGES.md for the design.
+
+  Coordinates:
+    {:local/root \"dir\"}                  a directory with its own deps.edn
+    {:git/url \"...\" :git/sha \"<full>\"}   checked out once, by sha, into
+                                         ~/.cache/clotran/gitlibs
+    {:mvn/version \"...\"}                 org.clojure/clojure and the spec
+                                         libraries are PROVIDED (clotran is
+                                         the Clojure); any other jar is refused
+  A library named at two different coordinates is an error naming both,
+  unless the project's own :deps names it: the project always wins."
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]))
+
+(def provided
+  "Libraries clotran itself is: named in a deps.edn for the JVM's sake,
+  nothing to fetch here."
+  #{'org.clojure/clojure 'org.clojure/spec.alpha 'org.clojure/core.specs.alpha})
+
+(defn- fail [msg data] (throw (ex-info (str "clotran-deps: " msg) data)))
+
+(defn- normalize
+  "A path with its . and dir/.. segments taken out, so an error names
+  the place, not the route to it."
+  [p]
+  (let [abs (str/starts-with? p "/")
+        parts (reduce (fn [acc seg]
+                        (cond (or (= seg "") (= seg ".")) acc
+                              (and (= seg "..") (seq acc) (not= (peek acc) "..")) (pop acc)
+                              :else (conj acc seg)))
+                      [] (str/split p #"/"))]
+    (str (when abs "/") (str/join "/" parts))))
+
+(defn- join [dir p]
+  (normalize (cond (str/starts-with? p "/") p
+                   (or (= dir ".") (= dir "")) p
+                   :else (str dir "/" p))))
+
+(defn read-deps
+  "The deps.edn in dir, or {} when there is none."
+  [dir]
+  (let [f (join dir "deps.edn")]
+    (if (clotran-file-exists? f) (edn/read-string (slurp f)) {})))
+
+(defn- with-aliases
+  "deps with the :extra-paths and :extra-deps of the named aliases added."
+  [deps aliases]
+  (reduce (fn [d a]
+            (let [al (get-in deps [:aliases a])]
+              (when-not al (fail (str "no alias " a) {:alias a}))
+              (-> d
+                  ;; onto the default ["src"] when the file names no :paths
+                  (update :paths #(into (or % ["src"]) (:extra-paths al)))
+                  (update :deps merge (:extra-deps al)))))
+          deps aliases))
+
+(defn- home [] (or (System/getenv "HOME") (System/getenv "USERPROFILE") "."))
+
+(defn- sh! [cmd what]
+  (when-not (zero? (clotran-sh cmd)) (fail (str what " failed") {:command cmd})))
+
+(defn- quote-sh [s] (str "'" (str/replace s "'" "'\\''") "'"))
+
+(defn git-dir
+  "The checkout of url at sha, made the first time it is asked for. A
+  checkout is never changed after: a sha names one tree."
+  [lib url sha]
+  (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha))
+    (fail (str lib " needs a full 40-character :git/sha") {:lib lib :sha sha}))
+  (let [dir (str (home) "/.cache/clotran/gitlibs/" (namespace lib) "/" (name lib) "/" sha)]
+    (when-not (clotran-file-exists? (str dir "/.git"))
+      (sh! (str "mkdir -p " (quote-sh dir) " && git clone --quiet " (quote-sh url) " " (quote-sh dir)
+                " && git -C " (quote-sh dir) " -c advice.detachedHead=false checkout --quiet " sha)
+           (str "fetching " lib)))
+    dir))
+
+(defn- dep-dir
+  "Where a coordinate's source is, relative to from (the directory whose
+  deps.edn named it); nil for a provided library."
+  [lib coord from]
+  (cond (provided lib) nil
+        (:local/root coord) (join from (:local/root coord))
+        (:git/url coord) (git-dir lib (:git/url coord) (:git/sha coord))
+        (:mvn/version coord) (fail (str lib " is a Maven jar, which is JVM bytecode; give it a :git/url or :local/root")
+                                   {:lib lib :coord coord})
+        :else (fail (str lib " has no coordinate clotran-deps knows") {:lib lib :coord coord})))
+
+(defn resolve-deps
+  "Every library the project in dir needs, breadth first: lib -> {:dir
+  :coord :from}. The project's own :deps are fixed first and win."
+  ([dir] (resolve-deps dir []))
+  ([dir aliases]
+   (let [top (with-aliases (read-deps dir) aliases)
+         pinned (set (keys (:deps top)))]
+     (loop [queue (vec (for [[lib coord] (:deps top)] [lib coord dir]))
+            found {}]
+       (if (empty? queue)
+         found
+         (let [[[lib coord from] & more] queue
+               d (dep-dir lib coord from)]
+           (cond
+             (nil? d) (recur (vec more) found)
+             (contains? found lib)
+             ;; the project's own choice was queued first, so it is the
+             ;; one found; anyone else disagreeing is only an error when
+             ;; the project has not chosen
+             (let [had (get found lib)]
+               (when (and (not (pinned lib)) (not= (:dir had) d))
+                 (fail (str lib " is wanted at two places: " (:dir had) " (by " (:from had) ") and " d " (by " from ")")
+                       {:lib lib}))
+               (recur (vec more) found))
+             :else
+             (let [theirs (read-deps d)]
+               (recur (into (vec more) (for [[l c] (:deps theirs)] [l c d]))
+                      (assoc found lib {:dir d :coord coord :from from :paths (or (:paths theirs) ["src"])}))))))))))
+
+(defn source-path
+  "The project's own :paths, then each library's, as CLOTRAN_PATH entries."
+  ([dir] (source-path dir []))
+  ([dir aliases]
+   (let [top (with-aliases (read-deps dir) aliases)
+         libs (resolve-deps dir aliases)]
+     (vec (concat (map #(join dir %) (or (:paths top) ["src"]))
+                  (for [[_ {d :dir ps :paths}] (sort-by key libs), p ps] (join d p)))))))
+
+(defn path-string
+  "source-path joined as CLOTRAN_PATH wants it."
+  [dir aliases]
+  (str/join ":" (source-path dir aliases)))
