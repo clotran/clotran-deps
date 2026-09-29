@@ -3,15 +3,23 @@
 #
 # Prints the CLOTRAN_PATH for the project in dir (default: here), from its
 # deps.edn, fetching what it names first; exits 1 with the reason on
-# stderr when it cannot. clotran runs it. Until clotran has -main and
-# *command-line-args* (its PLAN step 22), the arguments are written into
-# a one-line driver, as `clotran explain` does.
+# stderr when it cannot. The `clotran` launcher runs this itself in a
+# directory with a deps.edn; by hand:
 #
 #   CLOTRAN_PATH=$(clotran-deps) clotran app.cljf
 #
-# CLOTRAN is the clotran checkout to run on (default ~/jborden/clotran).
+# The answer is cached in dir/.clotran-cache, with a checksum of every
+# deps.edn it read, and reused while none of them has changed -- so an
+# unchanged project starts no clotran at all to find its path.
+#
+# CLOTRAN is the clotran checkout to run on (default: the one beside this
+# repository, then ~/jborden/clotran). Until clotran has -main and
+# *command-line-args* (its PLAN step 22), the arguments are written into
+# a one-line driver, as `clotran explain` does.
 here=$(cd "$(dirname "$0")/.." && pwd)
-clotran=${CLOTRAN:-$HOME/jborden/clotran}
+if [ -z "$CLOTRAN" ]; then
+  if [ -x "$here/../clotran/clotran" ]; then CLOTRAN="$here/../clotran"; else CLOTRAN="$HOME/jborden/clotran"; fi
+fi
 aliases=""
 dir="."
 for a in "$@"; do
@@ -21,14 +29,32 @@ for a in "$@"; do
   esac
 done
 dir=$(cd "$dir" && pwd) || exit 1
+cache="$dir/.clotran-cache"
+
+# the cached answer, if it was made for these aliases from these files
+if [ -f "$cache/path" ] && [ -f "$cache/files" ] && [ -f "$cache/sums" ] && \
+   [ "$(cat "$cache/aliases" 2>/dev/null)" = "$aliases" ]; then
+  now=$(tr '\n' '\0' < "$cache/files" | xargs -0 cksum 2>/dev/null)
+  if [ -n "$now" ] && [ "$now" = "$(cat "$cache/sums")" ]; then
+    cat "$cache/path"
+    exit 0
+  fi
+fi
+
 work=$(mktemp -d) || exit 1
 trap 'rm -rf "$work"' EXIT
 kws=""
 for k in $aliases; do kws="$kws :$k"; done
-printf '(require (quote clotran.deps))\n(try (println (clotran.deps/path-string "%s" [%s]))\n  (catch Exception e (binding [*out* *err*] (println (ex-message e))) (clotran-exit 1)))\n' \
+printf '(require (quote clotran.deps))\n(try (let [r (clotran.deps/resolution "%s" [%s])]\n  (println (str "path " (:path r)))\n  (doseq [f (:files r)] (println (str "file " f))))\n  (catch Exception e (binding [*out* *err*] (println (ex-message e))) (clotran-exit 1)))\n' \
   "$dir" "$kws" > "$work/run.clj"
-CLOTRAN_PATH="$here/src" "$clotran/clotran" "$work/run.clj" </dev/null >"$work/out" 2>"$work/err"
+CLOTRAN_PATH="$here/src" "$CLOTRAN/clotran" "$work/run.clj" </dev/null >"$work/out" 2>"$work/err"
 st=$?
-grep -v '^note:\|^user=>\|^ *$' "$work/out"
 grep -v '^note:\|^user=>' "$work/err" >&2
-exit $st
+[ $st -eq 0 ] || exit $st
+path=$(sed -n 's/^path //p' "$work/out")
+mkdir -p "$cache"
+printf '%s\n' "$path" > "$cache/path"
+sed -n 's/^file //p' "$work/out" > "$cache/files"
+tr '\n' '\0' < "$cache/files" | xargs -0 cksum > "$cache/sums" 2>/dev/null
+printf '%s' "$aliases" > "$cache/aliases"
+printf '%s\n' "$path"

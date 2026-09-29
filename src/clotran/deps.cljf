@@ -131,3 +131,14 @@
   "source-path joined as CLOTRAN_PATH wants it."
   [dir aliases]
   (str/join ":" (source-path dir aliases)))
+
+(defn resolution
+  "The path, and every deps.edn that went into it: a cached path is good
+  for as long as those files are unchanged."
+  [dir aliases]
+  (let [libs (resolve-deps dir aliases)
+        files (->> (cons dir (map :dir (vals libs)))
+                   (map #(join % "deps.edn"))
+                   (filter clotran-file-exists?)
+                   distinct)]
+    {:path (path-string dir aliases) :files (vec files)}))

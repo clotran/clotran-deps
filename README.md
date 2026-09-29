@@ -24,11 +24,15 @@ walked breadth first; a library wanted at two different places is an
 error naming both, unless the project's own `:deps` names it -- the
 project always wins.
 
+The `clotran` launcher runs this itself in a directory with a
+`deps.edn` (a leading `-A:alias` is passed on), so a project needs no
+`CLOTRAN_PATH` by hand. The answer is cached in `.clotran-cache/` beside
+the `deps.edn`, with a checksum of every `deps.edn` it read, and reused
+while none has changed; add `.clotran-cache/` to a project's
+`.gitignore`.
+
 ## Not yet
 
-- caching the resolved path (`.clotran-cache/path`, keyed by a hash of
-  every `deps.edn` read), and the `clotran` launcher calling this itself
-  in a directory with a `deps.edn`
 - `:git/tag` checked against `:git/sha`
 - native packages (a Fortran or C library with a build recipe)
 - `-main` and `*command-line-args*` in clotran (its PLAN step 22), which
