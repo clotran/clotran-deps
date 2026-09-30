@@ -2,7 +2,7 @@
   "clotran's package manager: reads a project's deps.edn -- the same file
   and keys a Clojure project has -- fetches what it names, and answers
   the source path clotran searches (CLOTRAN_PATH), as tools.deps answers
-  the JVM's classpath. See clotran's PACKAGES.md for the design.
+  clj's classpath. See clotran's PACKAGES.md for the design.
 
   Coordinates:
     {:local/root \"dir\"}                  a directory with its own deps.edn
@@ -17,7 +17,7 @@
             [clojure.string :as str]))
 
 (def provided
-  "Libraries clotran itself is: named in a deps.edn for the JVM's sake,
+  "Libraries clotran itself is: named in a deps.edn for clj's sake,
   nothing to fetch here."
   #{'org.clojure/clojure 'org.clojure/spec.alpha 'org.clojure/core.specs.alpha})
 
@@ -58,7 +58,7 @@
                   (update :deps merge (:extra-deps al)))))
           deps aliases))
 
-(defn- home [] (or (System/getenv "HOME") (System/getenv "USERPROFILE") "."))
+(defn- home [] (or (clotran.host.system/getenv "HOME") (clotran.host.system/getenv "USERPROFILE") "."))
 
 (defn- sh! [cmd what]
   (when-not (zero? (clotran-sh cmd)) (fail (str what " failed") {:command cmd})))
@@ -85,7 +85,7 @@
   (cond (provided lib) nil
         (:local/root coord) (join from (:local/root coord))
         (:git/url coord) (git-dir lib (:git/url coord) (:git/sha coord))
-        (:mvn/version coord) (fail (str lib " is a Maven jar, which is JVM bytecode; give it a :git/url or :local/root")
+        (:mvn/version coord) (fail (str lib " is a Maven jar, compiled for another host; give it a :git/url or :local/root")
                                    {:lib lib :coord coord})
         :else (fail (str lib " has no coordinate clotran-deps knows") {:lib lib :coord coord})))
 
@@ -142,3 +142,15 @@
                    (filter clotran-file-exists?)
                    distinct)]
     {:path (path-string dir aliases) :files (vec files)}))
+
+(defn -main
+  "`clotran -m clotran.deps DIR ALIAS...`: the project's path and the
+  deps.edn files it came from, a line each (\"path ...\", \"file ...\"); the
+  reason on stderr and status 1 when it cannot be resolved."
+  [dir & aliases]
+  (try (let [r (resolution dir (mapv keyword aliases))]
+         (println (str "path " (:path r)))
+         (doseq [f (:files r)] (println (str "file " f))))
+       (catch clotran.host.exception e
+         (binding [*out* *err*] (println (ex-message e)))
+         (clotran.host.system/exit 1))))

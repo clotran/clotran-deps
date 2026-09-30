@@ -28,7 +28,7 @@ check "a conflict nobody settled is an error" "$($D "$T/p2" 2>&1 >/dev/null | se
   "clotran-deps: c/c is wanted at two places: c1 (by a) and c2 (by b)"
 check "the project settles it" "$(rel "$($D "$T/p3")")" "p3/src a/src b/src c2/src "
 check "a Maven jar is refused by name" "$($D "$T/mvn" 2>&1 >/dev/null)" \
-  "clotran-deps: cheshire/cheshire is a Maven jar, which is JVM bytecode; give it a :git/url or :local/root"
+  "clotran-deps: cheshire/cheshire is a Maven jar, compiled for another host; give it a :git/url or :local/root"
 $D "$T/mvn" >/dev/null 2>&1; check "and the status says so" "$?" "1"
 check "an alias adds its paths" "$(rel "$($D -A:dev "$T/al")")" "al/src al/dev "
 

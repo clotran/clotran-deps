@@ -12,9 +12,7 @@
 # deps.edn it read, and reused while none of them has changed -- so an
 # unchanged project starts no clotran at all to find its path.
 #
-# CLOTRAN names the clotran to run on; see below. Until clotran has -main and
-# *command-line-args* (its PLAN step 22), the arguments are written into
-# a one-line driver, as `clotran explain` does.
+# CLOTRAN names the clotran to run on; see below. It runs clotran.deps/-main.
 here=$(cd "$(dirname "$0")/.." && pwd)
 # the clotran to run on: CLOTRAN (a checkout or an installed home), else
 # a checkout beside this one, else the clotran on PATH
@@ -45,11 +43,8 @@ fi
 
 work=$(mktemp -d) || exit 1
 trap 'rm -rf "$work"' EXIT
-kws=""
-for k in $aliases; do kws="$kws :$k"; done
-printf '(require (quote clotran.deps))\n(try (let [r (clotran.deps/resolution "%s" [%s])]\n  (println (str "path " (:path r)))\n  (doseq [f (:files r)] (println (str "file " f))))\n  (catch Exception e (binding [*out* *err*] (println (ex-message e))) (clotran-exit 1)))\n' \
-  "$dir" "$kws" > "$work/run.clj"
-CLOTRAN_PATH="$here/src" "$clotran_cmd" "$work/run.clj" </dev/null >"$work/out" 2>"$work/err"
+# $aliases unquoted: one argument each
+CLOTRAN_PATH="$here/src" "$clotran_cmd" -m clotran.deps "$dir" $aliases </dev/null >"$work/out" 2>"$work/err"
 st=$?
 grep -v '^note:\|^user=>' "$work/err" >&2
 [ $st -eq 0 ] || exit $st

@@ -3,7 +3,7 @@
 The package manager for [clotran](../clotran): it reads a project's
 `deps.edn` -- the same file, with the same keys, a Clojure project has --
 fetches what it names, and prints the source path clotran searches
-(`CLOTRAN_PATH`), as tools.deps computes the JVM's classpath. clotran
+(`CLOTRAN_PATH`), as tools.deps computes clj's classpath. clotran
 itself knows only that path; everything here is a separate program, run
 by clotran. The design is clotran's `PACKAGES.md`.
 
@@ -16,7 +16,7 @@ by clotran. The design is clotran's `PACKAGES.md`.
 |---|---|
 | `{:local/root "dir"}` | that directory, and its own `deps.edn` |
 | `{:git/url "..." :git/sha "<40 hex>"}` | checked out once into `~/.cache/clotran/gitlibs/<lib>/<sha>` and never changed; a short or missing sha is refused |
-| `{:mvn/version "..."}` | `org.clojure/clojure`, `spec.alpha`, `core.specs.alpha` are PROVIDED -- clotran is the Clojure; any other jar is refused by name, being JVM bytecode |
+| `{:mvn/version "..."}` | `org.clojure/clojure`, `spec.alpha`, `core.specs.alpha` are PROVIDED -- clotran is the Clojure; any other jar is refused by name, being compiled for another host |
 
 `:paths` (default `["src"]`), `:deps` and `:aliases` with `:extra-paths`
 and `:extra-deps` mean what they mean in tools.deps. Dependencies are
