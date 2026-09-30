@@ -38,6 +38,17 @@ while none has changed; add `.clotran-cache/` to a project's
 - `-main` and `*command-line-args*` in clotran (its PLAN step 22), which
   will replace the one-line driver `bin/clotran-deps` writes
 
+## Install
+
+    make install                 # ~/.local: ~/.local/bin/clotran-deps
+    make install PREFIX=/usr/local
+    make uninstall
+
+The same `PREFIX` layout as clotran's own `make install`, so the two sit
+side by side and each finds the other. The clotran it runs on is
+`CLOTRAN` if set, else a clotran beside it (a checkout, or the installed
+one), else the `clotran` on PATH.
+
 ## Tests
 
-    test/run.sh      # CLOTRAN=<clotran checkout>, default ~/jborden/clotran
+    make test        # test/run.sh; CLOTRAN=<clotran> to choose which
