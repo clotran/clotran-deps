@@ -40,11 +40,46 @@
                    (or (= dir ".") (= dir "")) p
                    :else (str dir "/" p))))
 
+(defn- check-deps
+  "The shape tools.deps accepts, or an error naming the file: a map, its
+  :deps a map of coordinate maps, its :paths a vector of strings. clj
+  refuses all of these (`clj -Spath`, \"Error reading deps\"); taking them
+  answered a path built from nothing (scripts/fuzz-deps, malformed)."
+  [f m]
+  (let [bad (fn [what] (fail (str f ": " what) {:file f}))]
+    ;; nil is no deps, as an empty file is
+    (when-not (or (nil? m) (map? m)) (bad "deps.edn must be a map"))
+    (when (contains? m :deps)
+      (when-not (map? (:deps m)) (bad ":deps must be a map of libraries to coordinates"))
+      (doseq [[lib coord] (:deps m)]
+        (when-not (symbol? lib) (bad (str "a library is a symbol, not " (pr-str lib))))
+        (when-not (map? coord) (bad (str lib " has no coordinate clotran-deps knows")))
+        (when (and (contains? coord :local/root) (not (string? (:local/root coord))))
+          (bad (str lib "'s :local/root must be a string")))))
+    (when (contains? m :paths)
+      (when-not (and (vector? (:paths m)) (every? string? (:paths m)))
+        (bad ":paths must be a vector of strings")))
+    (or m {})))
+
 (defn read-deps
-  "The deps.edn in dir, or {} when there is none."
+  "The deps.edn in dir, or {} when there is none or it is empty, as for
+  clj; a file that is not EDN, or not the shape of one, is an error
+  naming it."
   [dir]
   (let [f (join dir "deps.edn")]
-    (if (clotran-file-exists? f) (edn/read-string (slurp f)) {})))
+    (if (clotran-file-exists? f)
+      (let [text (slurp f)]
+        (if (str/blank? text)
+          {}
+          ;; every form in it, so text after the first is not ignored:
+          ;; tools.deps wants exactly one
+          (let [forms (try (edn/read-string (str "[" text "\n]"))
+                           (catch clotran.host.exception e
+                             (fail (str f ": " (ex-message e)) {:file f})))]
+            (when (> (count forms) 1)
+              (fail (str f ": more than one form; a deps.edn is one map") {:file f}))
+            (check-deps f (first forms)))))
+      {})))
 
 (defn- with-aliases
   "deps with the :extra-paths and :extra-deps of the named aliases added."
@@ -83,7 +118,10 @@
   deps.edn named it); nil for a provided library."
   [lib coord from]
   (cond (provided lib) nil
-        (:local/root coord) (join from (:local/root coord))
+        (:local/root coord) (let [d (join from (:local/root coord))]
+                              (when-not (clotran-file-exists? d)
+                                (fail (str "local lib " lib " not found: " d) {:lib lib :dir d}))
+                              d)
         (:git/url coord) (git-dir lib (:git/url coord) (:git/sha coord))
         (:mvn/version coord) (fail (str lib " is a Maven jar, compiled for another host; give it a :git/url or :local/root")
                                    {:lib lib :coord coord})
