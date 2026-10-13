@@ -35,10 +35,16 @@
                       [] (str/split p #"/"))]
     (str (when abs "/") (str/join "/" parts))))
 
-(defn- join [dir p]
-  (normalize (cond (str/starts-with? p "/") p
-                   (or (= dir ".") (= dir "")) p
-                   :else (str dir "/" p))))
+(def ^:private windows? (= ";" (clotran.host.system/getProperty "path.separator")))
+
+(defn- join
+  "p from dir. On Windows a \\ separates too, as clj's host reads a path
+  there (C:\\lib, ..\\lib); elsewhere it is part of a name."
+  [dir p]
+  (let [p (if windows? (str/replace p "\\" "/") p)]
+    (normalize (cond (re-find #"^([A-Za-z]:)?/" p) p   ; absolute, C:/ on Windows
+                     (or (= dir ".") (= dir "")) p
+                     :else (str dir "/" p)))))
 
 (defn- check-deps
   "The shape tools.deps accepts, or an error naming the file: a map, its
@@ -166,9 +172,10 @@
                   (for [[_ {d :dir ps :paths}] (sort-by key libs), p ps] (join d p)))))))
 
 (defn path-string
-  "source-path joined as CLOTRAN_PATH wants it."
+  "source-path joined as CLOTRAN_PATH wants it: by the host's path.separator,
+  ; on Windows, where : is part of a drive."
   [dir aliases]
-  (str/join ":" (source-path dir aliases)))
+  (str/join (or (clotran.host.system/getProperty "path.separator") ":") (source-path dir aliases)))
 
 (defn resolution
   "The path, and every deps.edn that went into it: a cached path is good
