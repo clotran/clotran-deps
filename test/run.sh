@@ -6,7 +6,7 @@
 # check; exits 1 if any fails.
 D=$(cd "$(dirname "$0")/.." && pwd)/bin/clotran-deps
 # the clotran to run on, fixed before HOME is changed for the git cache
-export CLOTRAN="${CLOTRAN:-$HOME/jborden/clotran}"
+export CLOTRAN="${CLOTRAN:-$(cd "$(dirname "$0")/../.." && pwd)/clotran}"
 T=$(mktemp -d) || exit 1
 trap 'rm -rf "$T"' EXIT
 fails=0
