@@ -101,10 +101,9 @@
 
 (defn- home [] (or (clotran.host.system/getenv "HOME") (clotran.host.system/getenv "USERPROFILE") "."))
 
-(defn- sh! [cmd what]
-  (when-not (zero? (clotran-sh cmd)) (fail (str what " failed") {:command cmd})))
-
-(defn- quote-sh [s] (str "'" (str/replace s "'" "'\\''") "'"))
+(defn- run-git! [argv what]
+  ;; no shell between: the program and its arguments, as they are
+  (when-not (zero? (clotran-run argv nil nil nil true)) (fail (str what " failed") {:command argv})))
 
 (defn git-dir
   "The checkout of url at sha, made the first time it is asked for. A
@@ -114,9 +113,9 @@
     (fail (str lib " needs a full 40-character :git/sha") {:lib lib :sha sha}))
   (let [dir (str (home) "/.cache/clotran/gitlibs/" (namespace lib) "/" (name lib) "/" sha)]
     (when-not (clotran-file-exists? (str dir "/.git"))
-      (sh! (str "mkdir -p " (quote-sh dir) " && git clone --quiet " (quote-sh url) " " (quote-sh dir)
-                " && git -C " (quote-sh dir) " -c advice.detachedHead=false checkout --quiet " sha)
-           (str "fetching " lib)))
+      (clotran-mkdirs dir)
+      (run-git! ["git" "clone" "--quiet" url dir] (str "fetching " lib))
+      (run-git! ["git" "-C" dir "-c" "advice.detachedHead=false" "checkout" "--quiet" sha] (str "fetching " lib)))
     dir))
 
 (defn- dep-dir
@@ -188,14 +187,37 @@
                    distinct)]
     {:path (path-string dir aliases) :files (vec files)}))
 
+(defn- sums [files] (mapv #(hash (clotran-slurp %)) files))
+
+(defn cached-path
+  "path-string for the project in dir, through dir/.clotran-cache: the
+  answer is kept with the deps.edn files it was read from and their sums,
+  and reused while none of them has changed and the aliases are the
+  same -- so an unchanged project resolves nothing. clotran's launcher
+  calls this in a project directory."
+  [dir aliases]
+  (let [cache (join dir ".clotran-cache/deps.edn")
+        old (when (clotran-file-exists? cache)
+              (try (read-string (clotran-slurp cache)) (catch clotran.host.exception _ nil)))]
+    (if (and (map? old) (= (:aliases old) (vec aliases))
+             (every? clotran-file-exists? (:files old))
+             (= (:sums old) (sums (:files old))))
+      (:path old)
+      (let [{:keys [path files]} (resolution dir aliases)]
+        (clotran-mkdirs (join dir ".clotran-cache"))
+        (clotran-spit cache (pr-str {:aliases (vec aliases) :files files :sums (sums files) :path path}))
+        path))))
+
 (defn -main
-  "`clotran -m clotran.deps DIR ALIAS...`: the project's path and the
-  deps.edn files it came from, a line each (\"path ...\", \"file ...\"); the
-  reason on stderr and status 1 when it cannot be resolved."
-  [dir & aliases]
-  (try (let [r (resolution dir (mapv keyword aliases))]
-         (println (str "path " (:path r)))
-         (doseq [f (:files r)] (println (str "file " f))))
-       (catch clotran.host.exception e
-         (binding [*out* *err*] (println (ex-message e)))
-         (clotran.host.system/exit 1))))
+  "`clotran-deps [-A:alias[:alias...]] [dir]`: the CLOTRAN_PATH of the
+  project in dir (default: here), fetching what its deps.edn names first;
+  the reason on stderr and status 1 when it cannot be resolved."
+  [& args]
+  (let [aliases (vec (for [a args :when (str/starts-with? a "-A")
+                           al (str/split (subs a 2) #":") :when (seq al)]
+                       (keyword al)))
+        dir (or (last (remove #(str/starts-with? % "-A") args)) ".")]
+    (try (println (cached-path dir aliases))
+         (catch clotran.host.exception e
+           (binding [*out* *err*] (println (ex-message e)))
+           (clotran.host.system/exit 1)))))

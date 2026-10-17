@@ -3,55 +3,19 @@
 #
 # Prints the CLOTRAN_PATH for the project in dir (default: here), from its
 # deps.edn, fetching what it names first; exits 1 with the reason on
-# stderr when it cannot. The `clotran` launcher runs this itself in a
-# directory with a deps.edn; by hand:
+# stderr when it cannot. The `clotran` command resolves a project's
+# deps.edn itself, through the same code (clotran.deps/cached-path); by hand:
 #
 #   CLOTRAN_PATH=$(clotran-deps) clotran app.cljf
 #
-# The answer is cached in dir/.clotran-cache, with a checksum of every
-# deps.edn it read, and reused while none of them has changed -- so an
-# unchanged project starts no clotran at all to find its path.
-#
-# CLOTRAN names the clotran to run on; see below. It runs clotran.deps/-main.
+# The answer is cached in dir/.clotran-cache with the deps.edn files it was
+# read from, and reused while none of them has changed. Everything is
+# clotran.deps/-main; this only finds a clotran to run it on: CLOTRAN (a
+# checkout or an installed home), else a checkout beside this one, else the
+# clotran on PATH. (On Windows, bin\clotran-deps.cmd in a release.)
 here=$(cd "$(dirname "$0")/.." && pwd)
-# the clotran to run on: CLOTRAN (a checkout or an installed home), else
-# a checkout beside this one, else the clotran on PATH
 if [ -n "$CLOTRAN" ]; then clotran_cmd="$CLOTRAN/clotran"
 elif [ -x "$here/../clotran/clotran" ]; then clotran_cmd="$here/../clotran/clotran"
 else clotran_cmd=$(command -v clotran) || { echo "clotran-deps: no clotran found (set CLOTRAN, or put clotran on PATH)" >&2; exit 1; }
 fi
-aliases=""
-dir="."
-for a in "$@"; do
-  case "$a" in
-    -A*) aliases=$(printf '%s' "${a#-A}" | tr ':' ' ') ;;
-    *) dir="$a" ;;
-  esac
-done
-dir=$(cd "$dir" && pwd) || exit 1
-cache="$dir/.clotran-cache"
-
-# the cached answer, if it was made for these aliases from these files
-if [ -f "$cache/path" ] && [ -f "$cache/files" ] && [ -f "$cache/sums" ] && \
-   [ "$(cat "$cache/aliases" 2>/dev/null)" = "$aliases" ]; then
-  now=$(tr '\n' '\0' < "$cache/files" | xargs -0 cksum 2>/dev/null)
-  if [ -n "$now" ] && [ "$now" = "$(cat "$cache/sums")" ]; then
-    cat "$cache/path"
-    exit 0
-  fi
-fi
-
-work=$(mktemp -d) || exit 1
-trap 'rm -rf "$work"' EXIT
-# $aliases unquoted: one argument each
-CLOTRAN_PATH="$here/src" "$clotran_cmd" -m clotran.deps "$dir" $aliases </dev/null >"$work/out" 2>"$work/err"
-st=$?
-grep -v '^note:\|^user=>' "$work/err" >&2
-[ $st -eq 0 ] || exit $st
-path=$(sed -n 's/^path //p' "$work/out")
-mkdir -p "$cache"
-printf '%s\n' "$path" > "$cache/path"
-sed -n 's/^file //p' "$work/out" > "$cache/files"
-tr '\n' '\0' < "$cache/files" | xargs -0 cksum > "$cache/sums" 2>/dev/null
-printf '%s' "$aliases" > "$cache/aliases"
-printf '%s\n' "$path"
+CLOTRAN_PATH="$here/src" exec "$clotran_cmd" -m clotran.deps "$@" </dev/null

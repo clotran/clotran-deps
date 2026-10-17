@@ -32,10 +32,12 @@ check "a Maven jar is refused by name" "$($D "$T/mvn" 2>&1 >/dev/null)" \
 $D "$T/mvn" >/dev/null 2>&1; check "and the status says so" "$?" "1"
 check "an alias adds its paths" "$(rel "$($D -A:dev "$T/al")")" "al/src al/dev "
 
-# the cache: a second run answers without starting clotran at all, and
-# changing any deps.edn it read -- a dependency's too -- is noticed
+# the cache: a second run answers from .clotran-cache -- the path there,
+# rewritten to a sentinel, is what comes back -- and changing any deps.edn
+# it read -- a dependency's too -- is noticed
 first=$(rel "$($D "$T/p1")")
-check "a second run is answered from the cache" "$(rel "$(CLOTRAN=/nonexistent $D "$T/p1" 2>/dev/null)")" "$first"
+sed 's|:path "[^"]*"|:path "CACHED"|' "$T/p1/.clotran-cache/deps.edn" > "$T/c.edn" && mv "$T/c.edn" "$T/p1/.clotran-cache/deps.edn"
+check "a second run is answered from the cache" "$($D "$T/p1")" "CACHED"
 echo '{:deps {c/c {:local/root "../c2"}}}' > "$T/a/deps.edn"
 check "a dependency's deps.edn changing is noticed" "$(rel "$($D "$T/p1")")" "p1/src a/src c2/src "
 check "other aliases are not the cached answer" "$(rel "$($D -A:dev "$T/al")")" "al/src al/dev "
