@@ -15,7 +15,7 @@ by clotran. The design is clotran's `PACKAGES.md`.
 | coordinate | here |
 |---|---|
 | `{:local/root "dir"}` | that directory, and its own `deps.edn` |
-| `{:git/url "..." :git/sha "<40 hex>"}` | checked out once into `~/.cache/clotran/gitlibs/<lib>/<sha>` and never changed; a short or missing sha is refused |
+| `{:git/url "..." :git/sha "<40 hex>"}` | checked out once into the cache, `~/.clotran/cache/src/<group>/<name>/<sha>` (`CLOTRAN_CACHE` moves the cache), and never changed; a short or missing sha is refused |
 | `{:mvn/version "..."}` | `org.clojure/clojure`, `spec.alpha`, `core.specs.alpha` are PROVIDED -- clotran is the Clojure; any other jar is refused by name, being compiled for another host |
 
 `:paths` (default `["src"]`), `:deps` and `:aliases` with `:extra-paths`
@@ -26,9 +26,10 @@ project always wins.
 
 The `clotran` launcher runs this itself in a directory with a
 `deps.edn` (a leading `-A:alias` is passed on), so a project needs no
-`CLOTRAN_PATH` by hand. The answer is cached in `.clotran-cache/` beside
-the `deps.edn`, with a checksum of every `deps.edn` it read, and reused
-while none has changed; add `.clotran-cache/` to a project's
+`CLOTRAN_PATH` by hand. The answer is cached in `.clotran-cache/deps.edn` beside
+the `deps.edn`, with a checksum of every `deps.edn` it read and each
+library's directory (`:libs`, for a tool that wants to know where a
+dependency's sources are), and reused while none has changed; add `.clotran-cache/` to a project's
 `.gitignore`.
 
 ## Not yet

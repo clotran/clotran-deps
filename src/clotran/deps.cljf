@@ -7,14 +7,16 @@
   Coordinates:
     {:local/root \"dir\"}                  a directory with its own deps.edn
     {:git/url \"...\" :git/sha \"<full>\"}   checked out once, by sha, into
-                                         ~/.cache/clotran/gitlibs
+                                         the cache (clotran.cache:
+                                         ~/.clotran/cache/src, or $CLOTRAN_CACHE)
     {:mvn/version \"...\"}                 org.clojure/clojure and the spec
                                          libraries are PROVIDED (clotran is
                                          the Clojure); any other jar is refused
   A library named at two different coordinates is an error naming both,
   unless the project's own :deps names it: the project always wins."
   (:require [clojure.edn :as edn]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clotran.cache :as cache]))
 
 (def provided
   "Libraries clotran itself is: named in a deps.edn for clj's sake,
@@ -99,19 +101,18 @@
                   (update :deps merge (:extra-deps al)))))
           deps aliases))
 
-(defn- home [] (or (clotran.host.system/getenv "HOME") (clotran.host.system/getenv "USERPROFILE") "."))
-
 (defn- run-git! [argv what]
   ;; no shell between: the program and its arguments, as they are
   (when-not (zero? (clotran-run argv nil nil nil true)) (fail (str what " failed") {:command argv})))
 
 (defn git-dir
-  "The checkout of url at sha, made the first time it is asked for. A
-  checkout is never changed after: a sha names one tree."
+  "The checkout of url at sha, made the first time it is asked for, in
+  the cache's src directory (clotran.cache). A checkout is never changed
+  after: a sha names one tree."
   [lib url sha]
   (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha))
     (fail (str lib " needs a full 40-character :git/sha") {:lib lib :sha sha}))
-  (let [dir (str (home) "/.cache/clotran/gitlibs/" (namespace lib) "/" (name lib) "/" sha)]
+  (let [dir (cache/src-dir lib sha)]
     (when-not (clotran-file-exists? (str dir "/.git"))
       (clotran-mkdirs dir)
       (run-git! ["git" "clone" "--quiet" url dir] (str "fetching " lib))
@@ -177,24 +178,29 @@
   (str/join (or (clotran.host.system/getProperty "path.separator") ":") (source-path dir aliases)))
 
 (defn resolution
-  "The path, and every deps.edn that went into it: a cached path is good
-  for as long as those files are unchanged."
+  "The path; every deps.edn that went into it, since a cached path is good
+  for as long as those files are unchanged; and each library's directory,
+  coordinate and paths (:libs), for a tool that wants to know where a
+  dependency's sources are without resolving again -- an editor's index
+  (clotran's PLAN step 36)."
   [dir aliases]
   (let [libs (resolve-deps dir aliases)
         files (->> (cons dir (map :dir (vals libs)))
                    (map #(join % "deps.edn"))
                    (filter clotran-file-exists?)
                    distinct)]
-    {:path (path-string dir aliases) :files (vec files)}))
+    {:path (path-string dir aliases) :files (vec files)
+     :libs (into {} (for [[lib {:keys [dir coord paths]}] libs] [lib {:dir dir :coord coord :paths paths}]))}))
 
 (defn- sums [files] (mapv #(hash (clotran-slurp %)) files))
 
 (defn cached-path
-  "path-string for the project in dir, through dir/.clotran-cache: the
-  answer is kept with the deps.edn files it was read from and their sums,
-  and reused while none of them has changed and the aliases are the
-  same -- so an unchanged project resolves nothing. clotran's launcher
-  calls this in a project directory."
+  "path-string for the project in dir, through dir/.clotran-cache/deps.edn:
+  the answer is kept with the deps.edn files it was read from, their sums
+  and each library's directory (:libs, resolution), and reused while none
+  of the files has changed and the aliases are the same -- so an unchanged
+  project resolves nothing. clotran's launcher calls this in a project
+  directory."
   [dir aliases]
   (let [cache (join dir ".clotran-cache/deps.edn")
         old (when (clotran-file-exists? cache)
@@ -203,9 +209,9 @@
              (every? clotran-file-exists? (:files old))
              (= (:sums old) (sums (:files old))))
       (:path old)
-      (let [{:keys [path files]} (resolution dir aliases)]
+      (let [{:keys [path files libs]} (resolution dir aliases)]
         (clotran-mkdirs (join dir ".clotran-cache"))
-        (clotran-spit cache (pr-str {:aliases (vec aliases) :files files :sums (sums files) :path path}))
+        (clotran-spit cache (pr-str {:aliases (vec aliases) :files files :sums (sums files) :path path :libs libs}))
         path))))
 
 (defn -main

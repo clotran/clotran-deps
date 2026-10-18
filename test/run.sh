@@ -36,6 +36,8 @@ check "an alias adds its paths" "$(rel "$($D -A:dev "$T/al")")" "al/src al/dev "
 # rewritten to a sentinel, is what comes back -- and changing any deps.edn
 # it read -- a dependency's too -- is noticed
 first=$(rel "$($D "$T/p1")")
+check "each library's directory is written beside the path, for tools" \
+  "$(grep -o 'a/a {[^}]*}' "$T/p1/.clotran-cache/deps.edn" | grep -o ':dir "[^"]*"' | sed "s|$T/||")" ':dir "a"'
 sed 's|:path "[^"]*"|:path "CACHED"|' "$T/p1/.clotran-cache/deps.edn" > "$T/c.edn" && mv "$T/c.edn" "$T/p1/.clotran-cache/deps.edn"
 check "a second run is answered from the cache" "$($D "$T/p1")" "CACHED"
 echo '{:deps {c/c {:local/root "../c2"}}}' > "$T/a/deps.edn"
@@ -47,7 +49,7 @@ check "other aliases are not the cached answer" "$(rel "$($D -A:dev "$T/al")")" 
 sha=$(git -C "$T/g/lib" rev-parse HEAD)
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"$sha\"}}}" > "$T/gp/deps.edn"
 HOME="$T/home" check "a git sha is checked out into the cache" "$(HOME="$T/home" "$D" "$T/gp" | tr ':' '\n' | tail -1 | sed "s|^$T/||")" \
-  "home/.cache/clotran/gitlibs/t/lib/$sha/src"
+  "home/.clotran/cache/src/t/lib/$sha/src"
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"abc\"}}}" > "$T/gp/deps.edn"
 check "a short sha is refused" "$(HOME="$T/home" "$D" "$T/gp" 2>&1 >/dev/null)" "clotran-deps: t/lib needs a full 40-character :git/sha"
 
