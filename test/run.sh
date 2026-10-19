@@ -44,17 +44,20 @@ echo '{:deps {c/c {:local/root "../c2"}}}' > "$T/a/deps.edn"
 check "a dependency's deps.edn changing is noticed" "$(rel "$($D "$T/p1")")" "p1/src a/src c2/src "
 check "other aliases are not the cached answer" "$(rel "$($D -A:dev "$T/al")")" "al/src al/dev "
 
-# a git dependency, pinned by sha, checked out once into the cache
-( cd "$T/g/lib" && git init -q && echo '{}' > deps.edn && git add -A && git -c user.name=t -c user.email=t@t commit -q -m one )
-sha=$(git -C "$T/g/lib" rev-parse HEAD)
+# a git dependency, pinned by sha, fetched once into the cache: that one
+# commit, not the repository's history (the sha pinned is not the tip)
+( cd "$T/g/lib" && git init -q && echo '{}' > deps.edn && git add -A && git -c user.name=t -c user.email=t@t commit -q -m one \
+  && echo x > later && git add later && git -c user.name=t -c user.email=t@t commit -q -m two )
+sha=$(git -C "$T/g/lib" rev-parse HEAD~1)
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"$sha\"}}}" > "$T/gp/deps.edn"
 HOME="$T/home" check "a git sha is checked out into the cache" "$(HOME="$T/home" "$D" "$T/gp" | tr ':' '\n' | tail -1 | sed "s|^$T/||")" \
   "home/.clotran/cache/src/t/lib/$sha/src"
+check "only the pinned commit came, at depth 1" "$(git -C "$T/home/.clotran/cache/src/t/lib/$sha" rev-list --all --count) $(ls "$T/home/.clotran/cache/src/t/lib/$sha")" "1 deps.edn"
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"abc\"}}}" > "$T/gp/deps.edn"
 check "a short sha is refused" "$(HOME="$T/home" "$D" "$T/gp" 2>&1 >/dev/null)" "clotran-deps: t/lib needs a full 40-character :git/sha"
 
-# with no git on PATH (a fresh Windows), a GitHub library comes as
-# GitHub's archive of its sha -- clotran-plot, and clotran-ui through it
+# a GitHub library comes as GitHub's archive of its sha, so with no git
+# on PATH too (a fresh Windows) -- clotran-plot, and clotran-ui through it
 mkdir -p "$T/nogit" "$T/ng"
 for d in /usr/bin /bin; do for f in "$d"/*; do case "${f##*/}" in git*) ;; *) ln -sf "$f" "$T/nogit/";; esac; done; done
 echo '{:deps {clotran/clotran-plot {:git/url "https://github.com/clotran/clotran-plot.git" :git/sha "4c4f773b15c6f4eced04097dfd7fc37989aa6816"}}}' > "$T/ng/deps.edn"
@@ -63,6 +66,7 @@ check "no git: a GitHub sha and its dependency come as archives" \
   "clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src clotran-ui/a0e457ed58db5a9a322c0187b4b6cff9da328019/src "
 check "and the archive is unpacked there" "$(ls "$T/home/.clotran/cache/src/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src/clotran/plot.cljf" | sed "s|^$T/||")" \
   "home/.clotran/cache/src/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src/clotran/plot.cljf"
+check "with no history: no .git" "$(ls -a "$T/home/.clotran/cache/src/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816" | grep -c '^\.git$')" "0"
 
 # the clotran launcher itself, in a project directory: it asks this
 # program for the path and the project's namespaces load from it
