@@ -133,31 +133,33 @@
   system has, Windows 10 on; no git needed), elsewhere -- or when the
   archive cannot be had, a private repository -- git fetching that one
   commit at depth 1. A marker written last says the tree is whole, so a
-  fetch cut short is fetched again."
-  [lib url sha tag]
-  (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha))
-    (fail (str lib " needs a full 40-character :git/sha") {:lib lib :sha sha}))
-  (let [dir (cache/src-dir lib sha)
-        done (str dir "/.clotran-fetched")
-        what (str "fetching " lib)]
-    (when-not (clotran-file-exists? done)
-      (clotran-mkdirs dir)
-      (let [[_ repo] (re-matches #"(?:https://|git@)github\.com[/:]([^/]+/[^/]+?)(?:\.git)?/?" url)
-            tgz (str dir ".tar.gz")]
-        ;; the sha is what is fetched; a tag is only checked to agree
-        (when tag
-          (let [t (tag-sha dir repo url tag)]
-            (when-not (= t sha)
-              (fail (str lib "'s :git/tag " tag " names " (or t "no commit") ", not its :git/sha " sha)
-                    {:lib lib :tag tag :sha sha :tag-sha t}))))
-        (if (and repo (zero? (clotran-run ["curl" "-fsSL" "-o" tgz (str "https://codeload.github.com/" repo "/tar.gz/" sha)] nil nil nil true)))
-          (do (run-git! ["tar" "-xzf" tgz "--strip-components" "1" "-C" dir] (str "unpacking " lib))
-              (clotran-delete tgz))
-          (do (run-git! ["git" "-C" dir "init" "--quiet"] what)
-              (run-git! ["git" "-C" dir "fetch" "--quiet" "--depth" "1" url sha] what)
-              (run-git! ["git" "-C" dir "-c" "advice.detachedHead=false" "checkout" "--quiet" "FETCH_HEAD"] what))))
-      (clotran-spit done sha))
-    dir))
+  fetch cut short is fetched again. clotran's launcher calls it for a
+  tool tools.edn pins, with no tag."
+  ([lib url sha] (git-dir lib url sha nil))
+  ([lib url sha tag]
+   (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha))
+     (fail (str lib " needs a full 40-character :git/sha") {:lib lib :sha sha}))
+   (let [dir (cache/src-dir lib sha)
+         done (str dir "/.clotran-fetched")
+         what (str "fetching " lib)]
+     (when-not (clotran-file-exists? done)
+       (clotran-mkdirs dir)
+       (let [[_ repo] (re-matches #"(?:https://|git@)github\.com[/:]([^/]+/[^/]+?)(?:\.git)?/?" url)
+             tgz (str dir ".tar.gz")]
+         ;; the sha is what is fetched; a tag is only checked to agree
+         (when tag
+           (let [t (tag-sha dir repo url tag)]
+             (when-not (= t sha)
+               (fail (str lib "'s :git/tag " tag " names " (or t "no commit") ", not its :git/sha " sha)
+                     {:lib lib :tag tag :sha sha :tag-sha t}))))
+         (if (and repo (zero? (clotran-run ["curl" "-fsSL" "-o" tgz (str "https://codeload.github.com/" repo "/tar.gz/" sha)] nil nil nil true)))
+           (do (run-git! ["tar" "-xzf" tgz "--strip-components" "1" "-C" dir] (str "unpacking " lib))
+               (clotran-delete tgz))
+           (do (run-git! ["git" "-C" dir "init" "--quiet"] what)
+               (run-git! ["git" "-C" dir "fetch" "--quiet" "--depth" "1" url sha] what)
+               (run-git! ["git" "-C" dir "-c" "advice.detachedHead=false" "checkout" "--quiet" "FETCH_HEAD"] what))))
+       (clotran-spit done sha))
+     dir)))
 
 (defn- dep-dir
   "Where a coordinate's source is, relative to from (the directory whose
