@@ -6,11 +6,11 @@
 
   Coordinates:
     {:local/root \"dir\"}                  a directory with its own deps.edn
-    {:git/url \"...\" :git/sha \"<full>\"}   checked out once, by sha, into
-                                         (a :git/tag beside it is a label, checked
-                                         to name that sha when it is fetched)
-                                         the cache (clotran.cache:
-                                         ~/.clotran/cache/src, or $CLOTRAN_CACHE)
+    {:git/url \"...\" :git/sha \"<full>\"}   fetched once, by sha, into the cache
+                                         (clotran.cache: ~/.clotran/cache/tree,
+                                         or $CLOTRAN_CACHE); a :git/tag beside
+                                         it is a label, checked to name that
+                                         sha when it is fetched
     {:mvn/version \"...\"}                 org.clojure/clojure and the spec
                                          libraries are PROVIDED (clotran is
                                          the Clojure); any other jar is refused
