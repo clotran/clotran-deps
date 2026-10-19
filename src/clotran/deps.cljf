@@ -133,7 +133,7 @@
 
 (defn git-dir
   "The tree of url at sha, fetched the first time it is asked for into
-  the cache's src directory (clotran.cache), and never changed after: a
+  the cache's tree directory (clotran.cache), and never changed after: a
   sha names one tree. Only that tree comes, never the repository's
   history: from GitHub its archive of the sha (curl and tar, which every
   system has, Windows 10 on; no git needed), elsewhere -- or when the
