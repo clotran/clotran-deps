@@ -53,6 +53,17 @@ HOME="$T/home" check "a git sha is checked out into the cache" "$(HOME="$T/home"
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"abc\"}}}" > "$T/gp/deps.edn"
 check "a short sha is refused" "$(HOME="$T/home" "$D" "$T/gp" 2>&1 >/dev/null)" "clotran-deps: t/lib needs a full 40-character :git/sha"
 
+# with no git on PATH (a fresh Windows), a GitHub library comes as
+# GitHub's archive of its sha -- clotran-plot, and clotran-ui through it
+mkdir -p "$T/nogit" "$T/ng"
+for d in /usr/bin /bin; do for f in "$d"/*; do case "${f##*/}" in git*) ;; *) ln -sf "$f" "$T/nogit/";; esac; done; done
+echo '{:deps {clotran/clotran-plot {:git/url "https://github.com/clotran/clotran-plot.git" :git/sha "4c4f773b15c6f4eced04097dfd7fc37989aa6816"}}}' > "$T/ng/deps.edn"
+check "no git: a GitHub sha and its dependency come as archives" \
+  "$(HOME="$T/home" PATH="$T/nogit" "$D" "$T/ng" | tr ':' '\n' | grep -o 'clotran-[a-z]*/[0-9a-f]*/src$' | tr '\n' ' ')" \
+  "clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src clotran-ui/a0e457ed58db5a9a322c0187b4b6cff9da328019/src "
+check "and the archive is unpacked there" "$(ls "$T/home/.clotran/cache/src/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src/clotran/plot.cljf" | sed "s|^$T/||")" \
+  "home/.clotran/cache/src/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src/clotran/plot.cljf"
+
 # the clotran launcher itself, in a project directory: it asks this
 # program for the path and the project's namespaces load from it
 mkdir -p "$T/run/src/rn" "$T/dep/src/dp"
