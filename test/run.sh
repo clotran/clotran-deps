@@ -51,15 +51,15 @@ check "other aliases are not the cached answer" "$(rel "$($D -A:dev "$T/al")")" 
 sha=$(git -C "$T/g/lib" rev-parse HEAD~1)
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"$sha\"}}}" > "$T/gp/deps.edn"
 HOME="$T/home" check "a git sha is checked out into the cache" "$(HOME="$T/home" "$D" "$T/gp" | tr ':' '\n' | tail -1 | sed "s|^$T/||")" \
-  "home/.clotran/cache/src/t/lib/$sha/src"
-check "only the pinned commit came, at depth 1" "$(git -C "$T/home/.clotran/cache/src/t/lib/$sha" rev-list --all --count) $(ls "$T/home/.clotran/cache/src/t/lib/$sha")" "1 deps.edn"
+  "home/.clotran/cache/tree/t/lib/$sha/src"
+check "only the pinned commit came, at depth 1" "$(git -C "$T/home/.clotran/cache/tree/t/lib/$sha" rev-list --all --count) $(ls "$T/home/.clotran/cache/tree/t/lib/$sha")" "1 deps.edn"
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"abc\"}}}" > "$T/gp/deps.edn"
 check "a short sha is refused" "$(HOME="$T/home" "$D" "$T/gp" 2>&1 >/dev/null)" "clotran-deps: t/lib needs a full 40-character :git/sha"
 # a :git/tag is a label beside the sha: checked to name it when fetched
 # (annotated, so its peeled commit is what counts), refused when not
 git -C "$T/g/lib" -c user.name=t -c user.email=t@t tag -a v1 -m v1 HEAD~1 && git -C "$T/g/lib" tag v2 HEAD
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/tag \"v1\" :git/sha \"$sha\"}}}" > "$T/gp/deps.edn"
-check "a tag naming the sha is taken" "$(HOME="$T/home2" "$D" "$T/gp" | tr ':' '\n' | tail -1 | sed "s|^$T/||")" "home2/.clotran/cache/src/t/lib/$sha/src"
+check "a tag naming the sha is taken" "$(HOME="$T/home2" "$D" "$T/gp" | tr ':' '\n' | tail -1 | sed "s|^$T/||")" "home2/.clotran/cache/tree/t/lib/$sha/src"
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/tag \"v2\" :git/sha \"$sha\"}}}" > "$T/gp/deps.edn"
 check "a tag naming another commit is refused" "$(HOME="$T/home3" "$D" "$T/gp" 2>&1 >/dev/null)" \
   "clotran-deps: t/lib's :git/tag v2 names $(git -C "$T/g/lib" rev-parse HEAD), not its :git/sha $sha"
@@ -75,9 +75,9 @@ echo '{:deps {clotran/clotran-plot {:git/url "https://github.com/clotran/clotran
 check "no git: a GitHub sha and its dependency come as archives" \
   "$(HOME="$T/home" PATH="$T/nogit" "$D" "$T/ng" | tr ':' '\n' | grep -o 'clotran-[a-z]*/[0-9a-f]*/src$' | tr '\n' ' ')" \
   "clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src clotran-ui/a0e457ed58db5a9a322c0187b4b6cff9da328019/src "
-check "and the archive is unpacked there" "$(ls "$T/home/.clotran/cache/src/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src/clotran/plot.cljf" | sed "s|^$T/||")" \
-  "home/.clotran/cache/src/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src/clotran/plot.cljf"
-check "with no history: no .git" "$(ls -a "$T/home/.clotran/cache/src/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816" | grep -c '^\.git$')" "0"
+check "and the archive is unpacked there" "$(ls "$T/home/.clotran/cache/tree/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src/clotran/plot.cljf" | sed "s|^$T/||")" \
+  "home/.clotran/cache/tree/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816/src/clotran/plot.cljf"
+check "with no history: no .git" "$(ls -a "$T/home/.clotran/cache/tree/clotran/clotran-plot/4c4f773b15c6f4eced04097dfd7fc37989aa6816" | grep -c '^\.git$')" "0"
 
 # the clotran launcher itself, in a project directory: it asks this
 # program for the path and the project's namespaces load from it
@@ -88,5 +88,18 @@ echo '(ns dp.lib) (def answer 42)' > "$T/dep/src/dp/lib.cljf"
 echo '(ns rn.main (:require [dp.lib])) (println :launcher-says dp.lib/answer)' > "$T/run/src/rn/main.cljf"
 check "clotran in a project directory loads its dependencies" \
   "$(cd "$T/run" && PATH="$(dirname "$D"):$PATH" "$CLOTRAN/clotran" src/rn/main.cljf </dev/null 2>&1 | grep -o ':launcher-says.*')" ":launcher-says 42"
+
+# running never downloads: a git library not fetched yet is refused, with
+# what to do; clotran deps fetches it, and then the program runs
+mkdir -p "$T/nf/src/nf"
+echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"$sha\"}}}" > "$T/nf/deps.edn"
+echo '(ns nf.main) (println :fetched-runs)' > "$T/nf/src/nf/main.cljf"
+check "clotran does not fetch: it says to run clotran deps" \
+  "$(cd "$T/nf" && HOME="$T/home4" PATH="$(dirname "$D"):$PATH" "$CLOTRAN/clotran" -m nf.main </dev/null 2>&1 | grep -o 'not fetched yet.*')" \
+  "not fetched yet: \`clotran deps\` fetches what deps.edn names"
+check "clotran deps fetches, and says what is ready" \
+  "$(cd "$T/nf" && HOME="$T/home4" PATH="$(dirname "$D"):$PATH" "$CLOTRAN/clotran" deps </dev/null 2>&1)" "ready: t/lib"
+check "then it runs" \
+  "$(cd "$T/nf" && HOME="$T/home4" PATH="$(dirname "$D"):$PATH" "$CLOTRAN/clotran" -m nf.main </dev/null 2>&1 | grep -o ':fetched-runs')" ":fetched-runs"
 
 [ $fails -eq 0 ] && echo "CLOTRAN-DEPS TESTS PASSED" || { echo "CLOTRAN-DEPS TESTS FAILED: $fails"; exit 1; }

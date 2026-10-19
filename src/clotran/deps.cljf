@@ -103,6 +103,12 @@
                   (update :deps merge (:extra-deps al)))))
           deps aliases))
 
+(def ^:dynamic *fetch*
+  "Whether a library not in the cache yet is fetched, or refused: only
+  `clotran deps` (and the clotran-deps script) fetch; running a program,
+  a REPL or the tests never downloads anything."
+  false)
+
 (defn- run-git! [argv what]
   ;; no shell between: the program and its arguments, as they are
   (when-not (zero? (clotran-run argv nil nil nil true)) (fail (str what " failed") {:command argv})))
@@ -135,7 +141,7 @@
   commit at depth 1. A marker written last says the tree is whole, so a
   fetch cut short is fetched again. clotran's launcher calls it for a
   tool tools.edn pins, with no tag."
-  ([lib url sha] (git-dir lib url sha nil))
+  ([lib url sha] (binding [*fetch* true] (git-dir lib url sha nil)))
   ([lib url sha tag]
    (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha))
      (fail (str lib " needs a full 40-character :git/sha") {:lib lib :sha sha}))
@@ -143,6 +149,8 @@
          done (str dir "/.clotran-fetched")
          what (str "fetching " lib)]
      (when-not (clotran-file-exists? done)
+       (when-not *fetch*
+         (fail (str lib " is not fetched yet: `clotran deps` fetches what deps.edn names") {:lib lib :sha sha}))
        (clotran-mkdirs dir)
        (let [[_ repo] (re-matches #"(?:https://|git@)github\.com[/:]([^/]+/[^/]+?)(?:\.git)?/?" url)
              tgz (str dir ".tar.gz")]
@@ -256,16 +264,33 @@
         (clotran-spit cache (pr-str {:aliases (vec aliases) :files files :sums (sums files) :path path :libs libs}))
         path))))
 
+(defn- args->aliases+dir [args]
+  [(vec (for [a args :when (str/starts-with? a "-A")
+              al (str/split (subs a 2) #":") :when (seq al)]
+          (keyword al)))
+   (or (last (remove #(str/starts-with? % "-A") args)) ".")])
+
+(defn fetch-main
+  "`clotran deps [-A:alias...] [dir]`: fetches every library the project
+  in dir names, and says which are ready; the reason on stderr and status
+  1 when one cannot be had."
+  [& args]
+  (let [[aliases dir] (args->aliases+dir args)]
+    (try (binding [*fetch* true]
+           (cached-path dir aliases)
+           (let [libs (sort (map str (keys (resolve-deps dir aliases))))]
+             (println (if (seq libs) (str "ready: " (str/join " " libs)) "deps.edn names no libraries"))))
+         (catch clotran.host.exception e
+           (binding [*out* *err*] (println (ex-message e)))
+           (clotran.host.system/exit 1)))))
+
 (defn -main
   "`clotran-deps [-A:alias[:alias...]] [dir]`: the CLOTRAN_PATH of the
   project in dir (default: here), fetching what its deps.edn names first;
   the reason on stderr and status 1 when it cannot be resolved."
   [& args]
-  (let [aliases (vec (for [a args :when (str/starts-with? a "-A")
-                           al (str/split (subs a 2) #":") :when (seq al)]
-                       (keyword al)))
-        dir (or (last (remove #(str/starts-with? % "-A") args)) ".")]
-    (try (println (cached-path dir aliases))
+  (let [[aliases dir] (args->aliases+dir args)]
+    (try (println (binding [*fetch* true] (cached-path dir aliases)))
          (catch clotran.host.exception e
            (binding [*out* *err*] (println (ex-message e)))
            (clotran.host.system/exit 1)))))
