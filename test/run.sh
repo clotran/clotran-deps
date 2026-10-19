@@ -55,6 +55,17 @@ HOME="$T/home" check "a git sha is checked out into the cache" "$(HOME="$T/home"
 check "only the pinned commit came, at depth 1" "$(git -C "$T/home/.clotran/cache/src/t/lib/$sha" rev-list --all --count) $(ls "$T/home/.clotran/cache/src/t/lib/$sha")" "1 deps.edn"
 echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/sha \"abc\"}}}" > "$T/gp/deps.edn"
 check "a short sha is refused" "$(HOME="$T/home" "$D" "$T/gp" 2>&1 >/dev/null)" "clotran-deps: t/lib needs a full 40-character :git/sha"
+# a :git/tag is a label beside the sha: checked to name it when fetched
+# (annotated, so its peeled commit is what counts), refused when not
+git -C "$T/g/lib" -c user.name=t -c user.email=t@t tag -a v1 -m v1 HEAD~1 && git -C "$T/g/lib" tag v2 HEAD
+echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/tag \"v1\" :git/sha \"$sha\"}}}" > "$T/gp/deps.edn"
+check "a tag naming the sha is taken" "$(HOME="$T/home2" "$D" "$T/gp" | tr ':' '\n' | tail -1 | sed "s|^$T/||")" "home2/.clotran/cache/src/t/lib/$sha/src"
+echo "{:deps {t/lib {:git/url \"file://$T/g/lib\" :git/tag \"v2\" :git/sha \"$sha\"}}}" > "$T/gp/deps.edn"
+check "a tag naming another commit is refused" "$(HOME="$T/home3" "$D" "$T/gp" 2>&1 >/dev/null)" \
+  "clotran-deps: t/lib's :git/tag v2 names $(git -C "$T/g/lib" rev-parse HEAD), not its :git/sha $sha"
+echo '{:deps {t/ui {:git/url "https://github.com/clotran/clotran" :git/tag "v1.0.0-rc.7" :git/sha "a0e457ed58db5a9a322c0187b4b6cff9da328019"}}}' > "$T/gp/deps.edn"
+check "and on GitHub, by its API, before anything is fetched" "$(HOME="$T/home3" "$D" "$T/gp" 2>&1 >/dev/null)" \
+  "clotran-deps: t/ui's :git/tag v1.0.0-rc.7 names a7e58030512f500f5fe462dfb17c0174253f9add, not its :git/sha a0e457ed58db5a9a322c0187b4b6cff9da328019"
 
 # a GitHub library comes as GitHub's archive of its sha, so with no git
 # on PATH too (a fresh Windows) -- clotran-plot, and clotran-ui through it

@@ -7,6 +7,8 @@
   Coordinates:
     {:local/root \"dir\"}                  a directory with its own deps.edn
     {:git/url \"...\" :git/sha \"<full>\"}   checked out once, by sha, into
+                                         (a :git/tag beside it is a label, checked
+                                         to name that sha when it is fetched)
                                          the cache (clotran.cache:
                                          ~/.clotran/cache/src, or $CLOTRAN_CACHE)
     {:mvn/version \"...\"}                 org.clojure/clojure and the spec
@@ -105,6 +107,24 @@
   ;; no shell between: the program and its arguments, as they are
   (when-not (zero? (clotran-run argv nil nil nil true)) (fail (str what " failed") {:command argv})))
 
+(defn- tag-sha
+  "The commit tag names at url, or nil: from GitHub's API when the
+  repository is on GitHub (no git needed), else git ls-remote, its
+  peeled line (^{}) for an annotated tag."
+  [dir repo url tag]
+  (let [out (str dir ".tag")
+        read! (fn [] (let [t (when (clotran-file-exists? out) (clotran-slurp out))]
+                       (when (clotran-file-exists? out) (clotran-delete out))
+                       t))
+        gh (when (and repo (zero? (clotran-run ["curl" "-fsSL" "-H" "Accept: application/vnd.github.sha" "-o" out
+                                                (str "https://api.github.com/repos/" repo "/commits/refs/tags/" tag)] nil nil nil true)))
+             (str/trim (or (read!) "")))]
+    (or (not-empty gh)
+        (do (clotran-run ["git" "ls-remote" url (str "refs/tags/" tag) (str "refs/tags/" tag "^{}")] nil out nil true)
+            (let [lines (str/split-lines (or (read!) ""))
+                  line (or (first (filter #(str/ends-with? % "^{}") lines)) (first lines))]
+              (when line (first (str/split line #"\s+"))))))))
+
 (defn git-dir
   "The tree of url at sha, fetched the first time it is asked for into
   the cache's src directory (clotran.cache), and never changed after: a
@@ -114,7 +134,7 @@
   archive cannot be had, a private repository -- git fetching that one
   commit at depth 1. A marker written last says the tree is whole, so a
   fetch cut short is fetched again."
-  [lib url sha]
+  [lib url sha tag]
   (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha))
     (fail (str lib " needs a full 40-character :git/sha") {:lib lib :sha sha}))
   (let [dir (cache/src-dir lib sha)
@@ -124,6 +144,12 @@
       (clotran-mkdirs dir)
       (let [[_ repo] (re-matches #"(?:https://|git@)github\.com[/:]([^/]+/[^/]+?)(?:\.git)?/?" url)
             tgz (str dir ".tar.gz")]
+        ;; the sha is what is fetched; a tag is only checked to agree
+        (when tag
+          (let [t (tag-sha dir repo url tag)]
+            (when-not (= t sha)
+              (fail (str lib "'s :git/tag " tag " names " (or t "no commit") ", not its :git/sha " sha)
+                    {:lib lib :tag tag :sha sha :tag-sha t}))))
         (if (and repo (zero? (clotran-run ["curl" "-fsSL" "-o" tgz (str "https://codeload.github.com/" repo "/tar.gz/" sha)] nil nil nil true)))
           (do (run-git! ["tar" "-xzf" tgz "--strip-components" "1" "-C" dir] (str "unpacking " lib))
               (clotran-delete tgz))
@@ -142,7 +168,7 @@
                               (when-not (clotran-file-exists? d)
                                 (fail (str "local lib " lib " not found: " d) {:lib lib :dir d}))
                               d)
-        (:git/url coord) (git-dir lib (:git/url coord) (:git/sha coord))
+        (:git/url coord) (git-dir lib (:git/url coord) (:git/sha coord) (:git/tag coord))
         (:mvn/version coord) (fail (str lib " is a Maven jar, compiled for another host; give it a :git/url or :local/root")
                                    {:lib lib :coord coord})
         :else (fail (str lib " has no coordinate clotran-deps knows") {:lib lib :coord coord})))
